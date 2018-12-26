@@ -39,6 +39,7 @@ static void add_backtrace(unw_word_t ip, const char *buf);
 static void print_backtrace(char *pastebin);
 static char *pastebin_it(void);
 static void prompt_user(void);
+static char *extract_sourcecode(struct doit4me_fn_info *info);
 
 __attribute__((constructor))
 void doit4me_init(void)
@@ -52,6 +53,16 @@ void doit4me_init(void)
         doit4me_outfile = fopen(doit4me_outfile_name, "w");
         if (doit4me_outfile == NULL) {
             abort();
+        }
+    }
+
+    if (doit4me_pastebin_apikey == NULL) {
+        char *val = getenv("PASTEBIN_API_KEY");
+        if (val != NULL) {
+            doit4me_pastebin_apikey = val;
+        } else {
+            DIE("Error - no pastebin API key specified!\n"
+                "Use doit4me_pastebin_apikey or $PASTEBIN_API_KEY");
         }
     }
 
@@ -94,22 +105,22 @@ static void destroy_progname(void)
     free(g_progname);
 }
 
-struct doit4me_mem_struct {
-    size_t size; char *mem;
-};
 static size_t pastebin_curl_callback(void *contents, size_t size, size_t nmemb, void *data)
 {
     size_t realsize = size * nmemb;
-    struct doit4me_mem_struct *mem = data;
+    char **str = data;
 
-    mem->mem = realloc(mem->mem, mem->size + realsize + 1);
-    if (mem->mem == NULL) {
+    *str = malloc(realsize + 1);
+    if (*str == NULL) {
         DIE("Out of memory");
     }
 
-    memcpy(&mem->mem[mem->size], contents, realsize);
-    mem->size += realsize;
-    mem->mem[mem->size] = '\0';
+    fputc('"', doit4me_outfile);
+    fwrite(contents, size, nmemb, doit4me_outfile);
+    fputc('"', doit4me_outfile);
+
+    memcpy(*str, contents, realsize);
+    str[realsize] = '\0';
 
     return realsize;
 }
@@ -199,9 +210,7 @@ next_backtrace: (void)0;
 
     LOG("Postdata: %s", postfield);
 
-    struct doit4me_mem_struct response = {
-        .size = 0, .mem = NULL
-    };
+    char *response;
 
     curl_easy_setopt(curl, CURLOPT_URL, pastebin_url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, pastebin_curl_callback);
@@ -220,7 +229,7 @@ next_backtrace: (void)0;
     free(postfield);
     curl_easy_cleanup(curl);
 
-    return response.mem;
+    return response;
 }
 
 static void load_backtrace(int sig)
@@ -297,6 +306,14 @@ static void destroy_backtrace(void)
     free(g_backtrace);
 }
 
+static int backtrace_real(struct doit4me_fn_info *info)
+{
+    if (strcmp(info->file_name, "??") == 0) {
+        return 0;
+    }
+    return 1;
+}
+
 static void print_backtrace(char *pastebin)
 {
     FILE *outfile = tmpfile();
@@ -304,25 +321,32 @@ static void print_backtrace(char *pastebin)
         DIE("Error creating temp file: %s", strerror(errno));
     }
 
+    size_t i = 0;
+    while (!backtrace_real(&g_backtrace[i]))
+        i++;
+
     fputs("Hey I'm having a problem with my program "
             "that I need to finish for ~~homework~~ a personal project.\n\n"
             "I'm having an issue in this function here:\n\n", outfile);
-    fprintf(outfile, "    %s\n    %s\n", g_backtrace[2].fn_name, "void todo() { }");
+    char *source = extract_sourcecode(&g_backtrace[2]);
+    fprintf(outfile, "%s\n", source);
     fputs("\n\nI got the following stacktrace:\n\n", outfile);
 
-    for (size_t i = 2; i < g_backtrace_len; i++) {
+    for (; i < g_backtrace_len; i++) {
         LOG("%zu: %s() - %s : %ld", i, g_backtrace[i].fn_name, 
                 g_backtrace[i].file_name, g_backtrace[i].line_no);
 
-        fprintf(outfile, "    %s[%ld] - %s()\n",
-                basename(g_backtrace[i].file_name), g_backtrace[i].line_no, 
-                g_backtrace[i].fn_name);
+        if (backtrace_real(&g_backtrace[i])) {
+            fprintf(outfile, "    %s[%ld] - %s()\n",
+                    basename(g_backtrace[i].file_name), g_backtrace[i].line_no, 
+                    g_backtrace[i].fn_name);
+        }
 
     }
 
     fprintf(outfile, "\n\nYou can take a look at the source code [here](%s)\n",
             pastebin);
-    fprintf(outfile, "Thanks so much for the help!\n");
+    fprintf(outfile, "Thanks so much for the help!\n\n\n");
 
     rewind(outfile);
     char *line = NULL;
@@ -349,13 +373,37 @@ static void prompt_user(void)
     LOG("Got response '%c'", c);
 
     if (c == 'y' || c == 'Y') {
-        char *url = "<url>";// pastebin_it();
-        fprintf(stderr, "Go look at %s\n", url);
-        /* free(url); */
+        char *url = pastebin_it();
         print_backtrace(url);
+        free(url);
     } else {
         fprintf(stderr, "\nGood luck\n");
     }
 
     exit(EXIT_SUCCESS);
+}
+
+static char *extract_sourcecode(struct doit4me_fn_info *info)
+{
+    char *format = "sed \"%3$d i/*** ERROR HERE - LINE %3$d ***/\" \"%1$s\" | "
+        "indent -st -orig - | awk '"
+        "BEGIN { state = 0; last = \"\"; }\n"
+        "$0 ~ /^%2$s\\(/ { print last; state = 1; }\n"
+        "      { if (state == 1) print; }\n"
+        "$0 ~ /^}/ { if (state) state = 2; }\n"
+        "      { last = $0; }' | indent -st -linux - | sed 's/^/    /'";
+    char cmd[2048];
+    snprintf(cmd, sizeof cmd, format, info->file_name, info->fn_name, info->line_no);
+    FILE *proc = popen(cmd, "r");
+
+    char *line = NULL;
+    size_t n = 0;
+    ssize_t ret = getdelim(&line, &n, '\0', proc);
+    if (ret == -1) {
+        LOG("%s", cmd);
+        DIE("Error reading response from command");
+    }
+
+    pclose(proc);
+    return line;
 }

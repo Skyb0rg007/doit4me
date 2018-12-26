@@ -30,8 +30,8 @@ void internal_die_fn(FILE *outfile, const char *fmt, ...)
         fprintf(doit4me_outfile, "%s[%d]: " FMT "\n", \
                 __func__, __LINE__, ##__VA_ARGS__)
 
-#undef LOG
-#define LOG(...)
+/* #undef LOG */
+/* #define LOG(...) */
 
 struct doit4me_string {
     size_t size, count;
