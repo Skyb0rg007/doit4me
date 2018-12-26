@@ -59,3 +59,17 @@ Thanks so much for the help!
 
 
 By default the pastebin only lasts for 10 minutes - hopefully pastebin doesn't ban me
+
+# Use
+
+If you want to test this out (for some reason), do the following:
+
+    $ mkdir build; cd build
+    $ cmake ..
+    $ # Make sure awk and addr2line are on your PATH
+    $ # Now ./libdoit4me.so is there
+    $ # Get a pastebin API dev code on https://pastebin.com/api
+    $ export PASTEBIN_API_CODE=<code>
+    $ # Now link to ./libdoit4me.so, and run!
+    $ # This repo provides an example driver
+    $ ./driver/driver
