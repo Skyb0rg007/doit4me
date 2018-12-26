@@ -27,7 +27,7 @@ The best debugger around
     Programming is hard.
     Do you want someone else to solve your problem? [y/n]y
 
-The code then outputs the following:
+The code then outputs the following markdown:
 
 #####################
 
