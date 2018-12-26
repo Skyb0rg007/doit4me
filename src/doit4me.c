@@ -373,6 +373,7 @@ static void prompt_user(void)
     LOG("Got response '%c'", c);
 
     if (c == 'y' || c == 'Y') {
+        fprintf(stderr, "\n\n\n");
         char *url = pastebin_it();
         print_backtrace(url);
         free(url);

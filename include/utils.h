@@ -30,8 +30,8 @@ void internal_die_fn(FILE *outfile, const char *fmt, ...)
         fprintf(doit4me_outfile, "%s[%d]: " FMT "\n", \
                 __func__, __LINE__, ##__VA_ARGS__)
 
-/* #undef LOG */
-/* #define LOG(...) */
+#undef LOG
+#define LOG(...)
 
 struct doit4me_string {
     size_t size, count;
@@ -40,7 +40,6 @@ struct doit4me_string {
 
 static inline void str_append(struct doit4me_string *a, const char *b)
 {
-    fprintf(stderr, "Appending '%s' to '%s'\n", b, a->str);
     size_t b_len = strlen(b);
     a->count += b_len;
     if (a->count >= a->size) {
